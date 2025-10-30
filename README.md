@@ -1,2 +1,2 @@
-# JonMax-mybatis-plus
-JonMax-mybatis-plus
+# JonMax-Redis
+Jon Max Redis
