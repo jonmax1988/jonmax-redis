@@ -12,7 +12,7 @@ class HmDianPingApplicationTests {
     private ShopServiceImpl shopService;
 
     @Test
-    void testSaveHotKey(){
+    void testSaveHotKey() {
         shopService.saveShop2Redis(1L,10L);
     }
 }

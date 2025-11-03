@@ -1,8 +1,9 @@
 package com.hmdp.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
+
 import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
@@ -17,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -30,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
+    private  static final ExecutorService CACHE_REBUILD_EXECUTOR= Executors.newFixedThreadPool(10);
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
@@ -65,7 +69,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     }
 
     private boolean tryGetLock(String key) {
-        Boolean falg = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        Boolean falg = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", RedisConstants.LOCK_SHOP_TTL, TimeUnit.SECONDS);
         return BooleanUtil.isTrue(falg);
     }
 
@@ -166,9 +170,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //返回结果
         return shop;
     }
-    public void saveShop2Redis(Long id , Long expireSeconds){
+    public void saveShop2Redis(Long id , Long expireSeconds) {
         //查询店铺信息
         Shop shop= getById(id);
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         RedisData redisData = new RedisData();
         redisData.setData(shop);
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSeconds));
@@ -186,15 +195,34 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return null;
         }
         //4 命中存在，把JSON反序列化
+        RedisData redisData = JSONUtil.toBean(shopJson, RedisData.class);
+        //JSONObject data = (JSONObject)redisData.getData();
+        Shop shop = JSONUtil.toBean((JSONObject)redisData.getData(), Shop.class);
+        LocalDateTime expireTime = redisData.getExpireTime();
         //5 判断是否过期
-           //5.1 未过期直接返回店铺信息
+        if(expireTime.isAfter(LocalDateTime.now())){
+            //5.1 未过期直接返回店铺信息
+            return shop;
+        }
            //5.2 过期需要重建缓存
         //6 缓存重建
           //6.1 获取互斥锁
-         //6.2 判断是否获取锁成功
-        //6.3 成功，开启独立线程，重建缓存
+        String lockKey=RedisConstants.LOCK_SHOP_KEY+id;
+        boolean isLock = tryGetLock(lockKey);
+        //6.2 判断是否获取锁成功
+        if(isLock){
+            //6.3 成功，开启独立线程，重建缓存
+            try {
+                CACHE_REBUILD_EXECUTOR.submit(()-> {
+                    this.saveShop2Redis(id,RedisConstants.LOCK_SHOP_TTL);
+                });
+            }catch (Exception e){
+                throw  new RuntimeException(e);
+            }finally {
+                unLock(lockKey);
+            }
+        }
         //6.4 返回过期缓存（成功/失败）
-        
         return shop;
     }
 }
