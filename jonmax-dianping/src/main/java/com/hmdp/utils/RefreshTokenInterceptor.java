@@ -38,8 +38,12 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
             return true;
         }
         UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
-        stringRedisTemplate.expire(key,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+
+        //存储用户
+        UserHolder.saveUserDTO(userDTO);
         //6 放行
+        //刷新Token的有效期
+        stringRedisTemplate.expire(key,RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
         return true;
     }
 
